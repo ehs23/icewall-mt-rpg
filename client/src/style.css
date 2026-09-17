@@ -1,0 +1,126 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #e9f0f9;
+  background: #0b1421;
+  color-scheme: dark;
+  --app-height: 100dvh;
+  --edge: clamp(10px, 2vw, 24px);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body, #app {
+  width: 100%; height: 100%; margin: 0;
+  overflow: hidden; overscroll-behavior: none;
+}
+body { position: fixed; inset: 0; }
+button, input { font: inherit; font-size: 16px; border-radius: 10px; }
+button {
+  min-height: 44px; padding: 10px 16px;
+  border: 1px solid #658374; background: #a3f5b5; color: #10291e;
+  font-weight: 750; cursor: pointer;
+}
+button:hover:not(:disabled) { filter: brightness(1.12); }
+button:disabled { opacity: .55; cursor: wait; }
+:focus-visible { outline: 3px solid #8bbcff; outline-offset: 3px; }
+input {
+  padding: 12px; width: 100%; border: 1px solid #596f8c;
+  background: #0c1728; color: #fff;
+}
+.login-screen, .game-screen {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: var(--app-height);
+  overflow: hidden;
+}
+.login-screen {
+  display: grid; place-items: center; padding: 16px;
+  background: radial-gradient(ellipse at top, #234154, #0b1421 70%);
+}
+.login-card {
+  width: min(100%, 430px); padding: clamp(18px, 4vh, 32px);
+  border: 1px solid #425a72; border-radius: 20px;
+  background: #162538; box-shadow: 0 24px 70px #0005;
+}
+.eyebrow { display: block; font-size: 14px; color: #a3f5b5; }
+.login-card h1 { margin: 8px 0 16px; font-size: clamp(24px, 4vw, 32px); }
+.login-card p { line-height: 1.6; color: #c2d0e3; }
+.login-card label { display: block; margin: 22px 0 8px; }
+.login-card button { width: 100%; margin-top: 14px; }
+.login-card small { display: block; font-size: 14px; line-height: 1.5; color: #a6b9d0; }
+.status { line-height: 1.5; font-size: 14px; overflow-wrap: anywhere; }
+.status:empty { display: none; }
+
+/* The canvas occupies the whole browser viewport. Nothing sits outside it. */
+#game { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+#game canvas { display: block; touch-action: none; }
+.hud { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.hud-panel, .hud-logout, .hud-message, .pad {
+  position: absolute;
+  background: #102034df; border: 1px solid #819aaf66;
+  box-shadow: 0 4px 16px #0003; border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+.hud-panel { padding: 12px 16px; }
+.hud-stage {
+  top: max(var(--edge), env(safe-area-inset-top));
+  left: max(var(--edge), env(safe-area-inset-left));
+  max-width: calc(100% - 190px);
+}
+.hud-stage h1 { margin: 0 0 5px; font-size: clamp(18px, 2vw, 25px); line-height: 1.2; }
+#population { font-size: 14px; color: #c1d3e8; }
+.hud-logout {
+  top: max(var(--edge), env(safe-area-inset-top));
+  right: max(var(--edge), env(safe-area-inset-right));
+  color: #edf5ff; pointer-events: auto;
+}
+.hud-character {
+  left: max(var(--edge), env(safe-area-inset-left));
+  bottom: max(var(--edge), env(safe-area-inset-bottom));
+  display: grid; gap: 5px; max-width: calc(100% - 2 * var(--edge));
+}
+#character-name { font-size: 18px; overflow-wrap: anywhere; }
+#character-stats, #saved-at { color: #c1d3e8; font-size: 14px; line-height: 1.4; }
+.hud-message {
+  top: calc(max(var(--edge), env(safe-area-inset-top)) + 100px);
+  left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(560px, calc(100% - 32px));
+  margin: 0; padding: 10px 16px;
+  font-size: 15px; line-height: 1.5; text-align: center; overflow-wrap: anywhere;
+}
+.hud-message:empty { display: none; }
+.pad {
+  display: none; padding: 6px; text-align: center; pointer-events: auto;
+  right: max(var(--edge), env(safe-area-inset-right));
+  bottom: max(var(--edge), env(safe-area-inset-bottom));
+}
+.pad button {
+  width: 44px; height: 44px; min-height: 44px; padding: 0; margin: 2px;
+  touch-action: none; user-select: none; font-size: 20px;
+}
+@media (any-pointer: coarse) {
+  .pad { display: block; }
+  .hud-character { max-width: calc(100% - 180px); }
+}
+@media (max-width: 480px) {
+  .hud-panel { padding: 10px; }
+  .hud-stage { max-width: calc(100% - 163px); }
+  .hud-logout { padding: 10px; font-size: 14px; }
+  #population, #character-stats, #saved-at { font-size: 13px; }
+  #character-name { font-size: 16px; }
+  .hud-message { top: calc(max(var(--edge), env(safe-area-inset-top)) + 90px); }
+}
+@media (max-height: 500px) {
+  .login-card { padding: 16px 22px; }
+  .login-card .eyebrow, .login-description { display: none; }
+  .login-card h1 { font-size: 24px; margin: 0 0 10px; }
+  .login-card label { margin-top: 10px; }
+  .login-card small { margin-top: 10px; font-size: 13px; }
+  .hud-panel { padding: 8px 12px; }
+  .hud-stage h1 { font-size: 18px; }
+  #saved-at { display: none; }
+  .hud-message { top: 72px; padding: 8px 12px; }
+}
+@media (max-height: 330px) {
+  .login-card h1, .login-card small { display: none; }
+  .login-card { padding: 12px 18px; }
+  .login-card label { margin-top: 0; }
+}
