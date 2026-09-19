@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/build
+**/.git
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.sqlite*
+**/*.db*
+server/data
+**/test
+**/loadtest
+work
+outputs

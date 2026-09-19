@@ -1,372 +1,349 @@
-import Phaser from "phaser";
-import { Client } from "@colyseus/sdk";
-import "./style.css";
-
-type StageId = "plaza" | "forest";
-type PlayerData = {
-  nickname: string; stage: StageId; x: number; y: number;
-  level: number; experience: number; job: string; savedAt: number;
-};
-type WorldState = {
-  online: number;
-  players: {
-    get(id: string): PlayerData | undefined;
-    forEach(callback: (player: PlayerData, id: string) => void): void;
-  };
-};
-
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-  <section id="login-screen" class="login-screen">
-    <form id="login-form" class="login-card">
-      <span class="eyebrow">우리들의 RPG</span>
-      <h1>모험을 이어가자</h1>
-      <p class="login-description">같은 닉네임으로 지난 모험을 이어가.</p>
-      <label for="nickname">닉네임</label>
-      <input id="nickname" maxlength="24" autocomplete="off"
-        placeholder="닉네임 1~12자" required />
-      <button id="login-button" type="submit">모험 시작</button>
-      <p id="login-status" class="status" role="status" aria-live="polite"></p>
-      <small>닉네임만으로 접속하는 테스트 버전이야.</small>
-    </form>
-  </section>
-
-  <main id="game-screen" class="game-screen" hidden>
-    <div id="game"></div>
-    <div class="hud" aria-label="게임 정보">
-      <section class="hud-stage hud-panel">
-        <h1 id="stage-label">접속 중…</h1>
-        <span id="population"></span>
-      </section>
-      <button id="logout" class="hud-logout">저장하고 나가기</button>
-      <section class="hud-character hud-panel">
-        <strong id="character-name"></strong>
-        <span id="character-stats"></span>
-        <span id="saved-at">저장 확인 중…</span>
-      </section>
-      <p id="game-status" class="hud-message" role="status" aria-live="polite">캐릭터를 불러오는 중…</p>
-      <div id="touch-pad" class="pad" aria-label="이동 버튼">
-        <button data-key="ArrowUp" aria-label="위로 이동">↑</button>
-        <div>
-          <button data-key="ArrowLeft" aria-label="왼쪽 이동">←</button>
-          <button data-key="ArrowDown" aria-label="아래로 이동">↓</button>
-          <button data-key="ArrowRight" aria-label="오른쪽 이동">→</button>
-        </div>
-      </div>
-    </div>
-  </main>
-`;
-
-function element<T extends HTMLElement>(id: string) {
-  return document.getElementById(id) as T;
-}
-const loginScreen = element<HTMLElement>("login-screen");
-const gameScreen = element<HTMLElement>("game-screen");
-const loginForm = element<HTMLFormElement>("login-form");
-const nickname = element<HTMLInputElement>("nickname");
-const loginButton = element<HTMLButtonElement>("login-button");
-const loginStatus = element<HTMLElement>("login-status");
-const gameStatus = element<HTMLElement>("game-status");
-const logoutButton = element<HTMLButtonElement>("logout");
-const stageLabel = element<HTMLElement>("stage-label");
-const population = element<HTMLElement>("population");
-const savedAtLabel = element<HTMLElement>("saved-at");
-const characterName = element<HTMLElement>("character-name");
-const characterStats = element<HTMLElement>("character-stats");
-
-// Override VITE_SERVER_URL when deploying. Default also works over a local LAN
-// once the development servers are explicitly exposed on that LAN.
-const serverUrl = import.meta.env.VITE_SERVER_URL || `http://${location.hostname}:2567`;
-const client = new Client(serverUrl);
+import { BattleMotion, acceptedBattle, type BattleIntent } from './maze/battle-motion';
+import { availablePromotion, professionLabel } from './maze/professions';
+import { installQuizFit } from './maze/quiz-fit';
+import { installPagination } from './maze/pagination';
+import { MovementMotion } from './maze/motion';
+import { customModeView } from './maze/custom-mode';
+import { Client } from '@colyseus/sdk';
+import './style.css';
+import type { CustomMap, Monitor, Ranking, Snapshot } from './maze/types';
+import { closeable, node, type Send } from './maze/ui';
+import { drawMinimap, drawView, type MapGeometry } from './maze/vision';
+import { bindControls } from './maze/controls';
+import { renderEvent } from './maze/event-screen';
+import { characterPanel } from './maze/character';
+import { adminStats, eventEditor, monitoringPanel, type EditorData } from './maze/admin';
+const app = document.querySelector<HTMLDivElement>('#app')!;
+app.innerHTML = `
+ <section id="login-screen"><form id="login-form" class="login-card">
+  <span class="eyebrow">MAZE / QUIZ / BATTLE</span><h1>미로의 끝을 향해</h1><p>같은 닉네임으로 지난 탐험을 이어가실 수 있습니다.</p>
+  <label class="field">닉네임<input id="nickname" maxlength="12" autocomplete="username" required placeholder="닉네임을 입력해 주세요." /></label>
+  <label class="field" id="password-field" hidden>운영자 비밀번호<input id="password" type="password" maxlength="128" autocomplete="current-password" /></label>
+  <button id="login-button" type="submit">탐험 시작</button><p id="login-status" role="status" aria-live="polite"></p>
+ </form></section>
+ <main id="game-screen" hidden>
+  <canvas id="world" aria-label="주변 칸을 클릭하거나 터치하여 이동하는 미로"></canvas>
+  <div class="top-left hud"><strong id="identity"></strong><span id="location"></span><span id="save-time"></span></div>
+  <div class="top-right hud"><canvas id="minimap" aria-label="지나온 칸만 표시하는 지도"></canvas><span>탐험 지도</span></div>
+  <div class="bottom-hud"><div><strong id="health"></strong><span id="job"></span></div><div class="toolbar"><button id="character">능력치·전직</button><button id="watch" hidden>플레이어 관찰</button><button id="admin-stats" hidden>운영자 설정</button><button id="custom-mode" hidden>미로 커스텀</button><button id="reset-maze" hidden>전체 초기화</button><button id="logout">저장하고 나가기</button></div></div>
+  <div id="events"></div><div id="dialogs"></div><div id="finish"></div>
+  <p id="notice" role="status" aria-live="polite" hidden></p>
+ </main>`;
+installPagination(app);
+installQuizFit(app);
+const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const login = el<HTMLElement>('login-screen'), game = el<HTMLElement>('game-screen'), world = el<HTMLCanvasElement>('world'), minimap = el<HTMLCanvasElement>('minimap');
+const nickname = el<HTMLInputElement>('nickname'), password = el<HTMLInputElement>('password');
+// Production serves the page and WebSocket endpoint through the same HTTPS host.
+const url = import.meta.env.VITE_SERVER_URL || (import.meta.env.PROD
+    ? location.origin
+    : `${location.protocol}//${location.hostname}:2567`);
+const client = new Client(url);
 type ConnectedRoom = Awaited<ReturnType<typeof client.joinOrCreate>>;
-let room: ConnectedRoom | undefined;
-let game: Phaser.Game | undefined;
-let connecting = false;
-let loggingOut = false;
-let logoutTimer: number | undefined;
-let saveError = false;
-let savedBeforeError = 0;
-let stageNoticeTimer: number | undefined;
-const pressed = new Set<string>();
-
-// Keep the drawing surface inside the visible browser area, including when
-// a mobile keyboard or address bar changes the available height.
-function resizeViewport() {
-  const height = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+let room: ConnectedRoom | undefined, state: Snapshot | undefined, geometry: MapGeometry = { cx: 0, cy: 0, cell: 1 };
+const motion = new MovementMotion();
+const battleMotion = new BattleMotion();
+let battleIntent: BattleIntent | undefined;
+let queuedBattleSnapshot: Snapshot | undefined;
+let battlePresentationGeneration = 0;
+let battlePresentationPending = false;
+function cancelBattlePresentation() {
+    battlePresentationGeneration++;
+    battlePresentationPending = false;
+    battleIntent = undefined;
+    queuedBattleSnapshot = undefined;
+    battleMotion.cancel();
 }
-window.addEventListener("resize", resizeViewport);
-window.visualViewport?.addEventListener("resize", resizeViewport);
-resizeViewport();
-const viewportObserver = new ResizeObserver(() => {
-  if (gameScreen.hidden || !game?.isBooted) return;
-  const bounds = gameScreen.getBoundingClientRect();
-  if (bounds.width > 0 && bounds.height > 0) {
-    game.scale.resize(Math.round(bounds.width), Math.round(bounds.height));
-  }
-});
-viewportObserver.observe(gameScreen);
-
-const stageName = (stage: StageId) => stage === "forest" ? "바람숲" : "메인 광장";
-const currentState = () => room?.state as WorldState | undefined;
-const currentPlayer = () => room ? currentState()?.players?.get(room.sessionId) : undefined;
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-
-function clearLogoutTimer() {
-  if (logoutTimer !== undefined) window.clearTimeout(logoutTimer);
-  logoutTimer = undefined;
+let customData: CustomMap | undefined;
+let customView: ReturnType<typeof customModeView> | undefined;
+let nextSendAt = 0;
+let connecting = false, pending: number | null = null, sequence = 0, commandTimer: number | undefined, noticeTimer: number | undefined, eventSignature = '', dialog: 'stats' | 'editor' | 'adminStats' | null = null;
+let monitor: ReturnType<typeof monitoringPanel> | undefined;
+const observed = new Map<string, Monitor>();
+let rankings: Ranking[] = [];
+let finishShown: number | null = null;
+let noticeFade: Animation | undefined;
+let promotionNoticeActive = false;
+let deferredNotice: string | undefined;
+function showNotice(message: string, promotion = false) {
+    if (promotionNoticeActive && !promotion) { deferredNotice = message; return; }
+    promotionNoticeActive = promotion;
+    const area = el<HTMLElement>('notice');
+    window.clearTimeout(noticeTimer);
+    noticeFade?.cancel();
+    noticeFade = undefined;
+    area.textContent = message;
+    area.hidden = false;
+    noticeTimer = window.setTimeout(() => {
+        const fade = area.animate([{ opacity: 1 }, { opacity: 0 }], {
+            duration: 300, easing: 'ease-out', fill: 'forwards',
+        });
+        noticeFade = fade;
+        fade.onfinish = () => {
+            if (noticeFade !== fade) return;
+            area.hidden = true;
+            fade.cancel();
+            noticeFade = undefined;
+            promotionNoticeActive = false;
+            const next = deferredNotice;
+            deferredNotice = undefined;
+            if (next) showNotice(next);
+        };
+    }, 2000);
 }
-
-function returnToLogin(message: string) {
-  clearLogoutTimer();
-  window.clearTimeout(stageNoticeTimer);
-  room = undefined;
-  pressed.clear();
-  loggingOut = false;
-  game?.destroy(true);
-  game = undefined;
-  gameScreen.hidden = true;
-  loginScreen.hidden = false;
-  loginButton.disabled = false;
-  nickname.disabled = false;
-  loginStatus.textContent = message;
-  nickname.focus();
-}
-
-loginForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (connecting || room) return;
-  const name = nickname.value.normalize("NFC").trim();
-  if (!/^[\p{L}\p{N}_ -]{1,12}$/u.test(name)) {
-    loginStatus.textContent = "닉네임은 한글·영문·숫자·공백·밑줄·하이픈으로 1~12자 입력해 줘.";
-    return;
-  }
-  connecting = true;
-  loginButton.disabled = true;
-  nickname.disabled = true;
-  loginStatus.textContent = "캐릭터를 불러오는 중…";
-  try {
-    const joined = await client.joinOrCreate("world", { nickname: name });
-    room = joined;
-    loggingOut = false;
-    saveError = false;
-    pressed.clear();
-
-    joined.onMessage("saveError", (message: string) => {
-      if (room !== joined) return;
-      saveError = true;
-      savedBeforeError = currentPlayer()?.savedAt ?? 0;
-      gameStatus.textContent = message;
-      loggingOut = false;
-      logoutButton.disabled = false;
-      clearLogoutTimer();
-    });
-    joined.onError((errorCode, message) => {
-      if (room === joined) gameStatus.textContent = `연결 오류 ${errorCode}: ${message ?? ""}`;
-    });
-    joined.onLeave((closeCode) => {
-      if (room !== joined) return;
-      const normalLogout = loggingOut && closeCode === 4000;
-      returnToLogin(normalLogout ? "저장했어. 같은 닉네임으로 이어서 할 수 있어."
-        : "연결이 종료됐어. 같은 닉네임으로 다시 접속해 줘.");
-    });
-
-    loginScreen.hidden = true;
-    gameScreen.hidden = false;
-    gameStatus.textContent = "캐릭터를 불러오는 중…";
-    stageLabel.textContent = "접속 중…";
-    logoutButton.disabled = false;
-    game = new Phaser.Game({
-      type: Phaser.AUTO, parent: "game",
-      width: gameScreen.clientWidth, height: gameScreen.clientHeight,
-      backgroundColor: "#24384b",
-      scale: { mode: Phaser.Scale.RESIZE },
-      scene: AdventureScene,
-    });
-  } catch (error) {
-    loginStatus.textContent = `접속 실패: ${errorText(error)}`;
-    if (room) {
-      const failedRoom = room;
-      room = undefined;
-      void failedRoom.leave();
-      returnToLogin(`화면을 열지 못했어: ${errorText(error)}`);
+function draw() {
+    if (state && !game.hidden && !monitor) {
+        if (state.customMode)
+            return;
+        geometry = drawView(world, state, false, motion.frame);
+        drawMinimap(minimap, state);
     }
-  } finally {
+}
+function closeDialog() { dialog = null; el('dialogs').replaceChildren(); }
+function closeMonitor() { monitor?.destroy(); monitor = undefined; game.classList.remove('has-monitor'); draw(); }
+function clean(message: string) {
+    cancelBattlePresentation();
+    promotionNoticeActive = false;
+    deferredNotice = undefined;
+    window.clearTimeout(noticeTimer);
+    noticeFade?.cancel();
+    noticeFade = undefined;
+    el('notice').hidden = true;
+    motion.stop();
+    customView?.destroy();
+    customView = undefined;
+    customData = undefined;
+    room = undefined;
+    state = undefined;
+    pending = null;
+    window.clearTimeout(commandTimer);
+    closeDialog();
+    closeMonitor();
+    observed.clear();
+    rankings = [];
+    eventSignature = '';
+    finishShown = null;
+    sequence = 0;
+    el('events').replaceChildren();
+    el('finish').replaceChildren();
+    game.hidden = true;
+    login.hidden = false;
+    el('login-status').textContent = message;
+    el<HTMLButtonElement>('login-button').disabled = false;
     connecting = false;
-    loginButton.disabled = false;
-    nickname.disabled = false;
-  }
-});
-
-logoutButton.onclick = () => {
-  if (!room || loggingOut) return;
-  pressed.clear();
-  loggingOut = true;
-  logoutButton.disabled = true;
-  gameStatus.textContent = "캐릭터를 저장하는 중…";
-  try {
-    room.send("move", { x: 0, y: 0 });
-    room.send("logout");
-    logoutTimer = window.setTimeout(() => {
-      loggingOut = false;
-      logoutButton.disabled = false;
-      gameStatus.textContent = "저장 응답이 늦어지고 있어. 연결을 확인하고 다시 눌러 줘.";
-    }, 10000);
-  } catch (error) {
-    loggingOut = false;
-    logoutButton.disabled = false;
-    gameStatus.textContent = `연결을 확인해 줘: ${errorText(error)}`;
-  }
+}
+const send: Send = (action, data = {}) => {
+    if (!room || !state || pending !== null || motion.running || battlePresentationPending || Date.now() < nextSendAt)
+        return;
+    nextSendAt = Date.now() + (action === 'battle' ? 460 : action === 'answer' ? 810 : 190);
+    const id = ++sequence;
+    pending = id;
+    if (action === 'battle' && state.active?.battle && ['attack', 'skill1', 'skill2'].includes(String(data.action))) {
+        battleIntent = { before: state, action: data.action as BattleIntent['action'], stat: typeof data.stat === 'string' ? data.stat : undefined };
+    }
+    room.send('command', { id, revision: state.revision, action, data });
+    // Never resend a timed-out mutation: reconnect loads the committed server result.
+    window.clearTimeout(commandTimer);
+    commandTimer = window.setTimeout(() => {
+        if (pending === id) {
+            showNotice('서버 응답을 기다리고 있습니다. 연결이 끊기면 같은 닉네임으로 다시 접속해 주세요.');
+        }
+    }, 8000);
 };
-
-const movementKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-  "KeyW", "KeyA", "KeyS", "KeyD"]);
-window.addEventListener("keydown", (event) => {
-  if (!room || loggingOut || !movementKeys.has(event.code)) return;
-  if (event.target instanceof HTMLInputElement) return;
-  event.preventDefault();
-  pressed.add(event.code);
-});
-window.addEventListener("keyup", (event) => pressed.delete(event.code));
-function releaseMovement() {
-  pressed.clear();
-  try { room?.send("move", { x: 0, y: 0 }); } catch { /* Disconnect callback handles UI. */ }
+function update(p: Snapshot) {
+    if (battlePresentationPending) {
+        if (!queuedBattleSnapshot || p.revision >= queuedBattleSnapshot.revision) queuedBattleSnapshot = p;
+        return;
+    }
+    if (battleIntent && acceptedBattle(battleIntent, p)) {
+        const intent = battleIntent;
+        battleIntent = undefined;
+        queuedBattleSnapshot = p;
+        battlePresentationPending = true;
+        const generation = battlePresentationGeneration;
+        void battleMotion.play(el('events'), intent, p).catch(() => {}).finally(() => {
+            if (generation !== battlePresentationGeneration) return;
+            battlePresentationPending = false;
+            const latest = queuedBattleSnapshot;
+            queuedBattleSnapshot = undefined;
+            if (room && latest) update(latest);
+        });
+        return;
+    }
+    const previous = state;
+    state = p;
+    const promotion = availablePromotion(p);
+    if (promotion && (!previous || promotion !== availablePromotion(previous)))
+        showNotice(`${promotion}차 전직을 할 수 있습니다. 능력치 창을 열어 주세요.`, true);
+    el('character').textContent = p.level < 10 ? '능력치' : '능력치·전직';
+    if (previous && !p.customMode && !previous.customMode && Math.abs(previous.x - p.x) + Math.abs(previous.y - p.y) === 1) {
+        motion.start(previous, p, draw, () => { if (state)
+            update(state); });
+    }
+    if (p.customMode) {
+        motion.stop();
+        closeMonitor();
+        if (customData && !customView) {
+            customView = customModeView(customData, send, resetMaze);
+            game.append(customView.root);
+        }
+        el('events').hidden = true;
+    }
+    else {
+        customView?.destroy();
+        customView = undefined;
+        el('events').hidden = motion.running;
+    }
+    el('identity').textContent = `${p.nickname} · Lv.${p.level}${p.admin ? ' · 운영자' : ''}`;
+    el('location').textContent = `미로 · ${p.x + 1}열 ${p.y + 1}행`;
+    el('save-time').textContent = p.savedAt ? `저장 ${new Date(p.savedAt).toLocaleTimeString('ko-KR')}` : '저장 대기 중입니다.';
+    el('health').textContent = `체력 ${p.hp} / ${p.stats.hp}`;
+    el('job').textContent = `${professionLabel(p)} · 포인트 ${p.points}`;
+    el('watch').hidden = !p.admin;
+    el('admin-stats').hidden = !p.admin;
+    el('custom-mode').hidden = !p.admin;
+    el('reset-maze').hidden = !p.admin;
+    const signature = p.active ? JSON.stringify([p.active, p.active.kind === 'monster' ? [p.hp, p.stats, p.profession, p.advanced, p.skillLevel] : null]) : '';
+    if (!motion.running && signature !== eventSignature) {
+        eventSignature = signature;
+        el('events').replaceChildren(...(p.active ? [renderEvent(p, send)] : []));
+    }
+    if (dialog === 'stats' && JSON.stringify([previous?.stats, previous?.points, previous?.profession, previous?.advanced, previous?.level]) !== JSON.stringify([p.stats, p.points, p.profession, p.advanced, p.level]))
+        el('dialogs').replaceChildren(characterPanel(p, send, closeDialog));
+    if (dialog === 'adminStats' && previous && (previous.level !== p.level || previous.profession !== p.profession || previous.advanced !== p.advanced))
+        el('dialogs').replaceChildren(adminStats(p, send, closeDialog));
+    if (p.finishedAt && p.rank && finishShown !== p.finishedAt) {
+        finishShown = p.finishedAt;
+        showFinish(p.rank);
+    }
+    const rankLabel = el('finish').querySelector('.finish-rank');
+    if (rankLabel)
+        rankLabel.textContent = p.rank ? `${p.rank}위로 미로를 탈출하셨습니다.` : '운영자가 순위 기록을 삭제했습니다. 계속 탐험하실 수 있습니다.';
+    draw();
 }
-window.addEventListener("blur", releaseMovement);
-document.addEventListener("visibilitychange", () => { if (document.hidden) releaseMovement(); });
-document.querySelectorAll<HTMLButtonElement>("[data-key]").forEach((button) => {
-  const key = button.dataset.key!;
-  button.onpointerdown = (event) => {
-    if (!room || loggingOut) return;
+function showFinish(rank: number) { const { overlay, panel } = closeable('축하합니다!', () => el('finish').replaceChildren()); panel.append(node('p', `${rank}위로 미로를 탈출하셨습니다.`, 'finish-rank'), node('p', '창을 닫으시면 남은 미로를 계속 탐험하실 수 있습니다.')); el('finish').replaceChildren(overlay); }
+nickname.addEventListener('input', () => {
+    const admin = nickname.value.normalize('NFC').trim().toLowerCase() === 'taf';
+    el('password-field').hidden = !admin;
+    password.required = admin;
+    if (!admin)
+        password.value = '';
+});
+el<HTMLFormElement>('login-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    button.setPointerCapture(event.pointerId);
-    pressed.add(key);
-  };
-  button.onpointerup = () => pressed.delete(key);
-  button.onpointercancel = () => pressed.delete(key);
-  button.onlostpointercapture = () => pressed.delete(key);
-});
-
-class AdventureScene extends Phaser.Scene {
-  private avatars = new Map<string, Phaser.GameObjects.Container>();
-  private scenery?: Phaser.GameObjects.Container;
-  private displayedStage?: StageId;
-  private lastSent = 0;
-
-  create() {
-    this.game.canvas.setAttribute("aria-label", "RPG 게임 지도. 방향키나 WASD로 이동할 수 있어.");
-    this.fitCamera();
-    this.scale.on(Phaser.Scale.Events.RESIZE, this.fitCamera, this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this);
-    });
-  }
-
-  private fitCamera() {
-    const width = Math.max(1, this.scale.width);
-    const height = Math.max(1, this.scale.height);
-    const camera = this.cameras.main;
-    // Server coordinates stay 800 x 600. Cover the viewport without stretching
-    // avatars; on narrow screens the camera follows the player across the map.
-    camera.setViewport(0, 0, width, height);
-    camera.setZoom(Math.max(width / 800, height / 600));
-    camera.setBounds(0, 0, 800, 600);
-    const own = currentPlayer();
-    camera.centerOn(own?.x ?? 400, own?.y ?? 300);
-  }
-
-  private drawStage(stage: StageId) {
-    this.cameras.main.stopFollow();
-    this.scenery?.destroy();
-    for (const avatar of this.avatars.values()) avatar.destroy();
-    this.avatars.clear();
-    this.displayedStage = stage;
-    pressed.clear();
-    const forest = stage === "forest";
-    this.cameras.main.setBackgroundColor(forest ? "#173e32" : "#283b4d");
-    this.scenery = this.add.container(0, 0).setDepth(-10);
-    const ground = this.add.graphics();
-    ground.lineStyle(1, forest ? 0x24503c : 0x354b5e, 0.8);
-    for (let x = 0; x <= 800; x += 40) ground.lineBetween(x, 0, x, 600);
-    for (let y = 0; y <= 600; y += 40) ground.lineBetween(0, y, 800, y);
-    ground.fillStyle(forest ? 0x77684a : 0x64758a);
-    ground.fillRect(forest ? 0 : 330, 260, forest ? 460 : 470, 80);
-    ground.fillStyle(forest ? 0x365d3e : 0x465d74);
-    ground.fillCircle(400, 300, 90);
-    ground.lineStyle(3, forest ? 0x597f51 : 0x8298af);
-    ground.strokeCircle(400, 300, 90);
-    ground.fillStyle(0x91efbe, 0.85);
-    ground.fillRect(forest ? 0 : 768, 260, 32, 80);
-    this.scenery.add(ground);
-    const portal = this.add.text(forest ? 90 : 710, 235,
-      forest ? "← 광장으로" : "숲으로 →", {
-        fontFamily: "sans-serif", fontSize: "18px", color: "#d8ffe7",
-      }).setOrigin(0.5);
-    this.scenery.add(portal);
-    stageLabel.textContent = stageName(stage);
-    if (!loggingOut && !saveError) {
-      const message = `${stageName(stage)}에 도착했어.`;
-      gameStatus.textContent = message;
-      window.clearTimeout(stageNoticeTimer);
-      stageNoticeTimer = window.setTimeout(() => {
-        if (gameStatus.textContent === message) gameStatus.textContent = "";
-      }, 2500);
-    }
-  }
-
-  update(time: number, delta: number) {
-    const activeRoom = room;
-    const state = currentState();
-    const own = currentPlayer();
-    if (!activeRoom || !own || !state) return;
-    if (this.displayedStage !== own.stage) this.drawStage(own.stage);
-    const present = new Set<string>();
-    state.players.forEach((player, id) => {
-      // Server StateView already filters; this also prevents transition flashes.
-      if (player.stage !== own.stage) return;
-      present.add(id);
-      let avatar = this.avatars.get(id);
-      if (!avatar) {
-        const self = id === activeRoom.sessionId;
-        const body = this.add.circle(0, 0, 14, self ? 0xa3f5b5 : 0x8bbcff)
-          .setStrokeStyle(2, 0xffffff);
-        const label = this.add.text(0, -32, player.nickname, {
-          fontFamily: "sans-serif", fontSize: "15px", color: "#ffffff",
-          backgroundColor: "#142333", padding: { x: 5, y: 3 },
-        }).setOrigin(0.5);
-        avatar = this.add.container(player.x, player.y, [body, label]);
-        this.avatars.set(id, avatar);
-        if (self) this.cameras.main.startFollow(avatar, false, 1, 1);
-      }
-      const blend = 1 - Math.exp(-delta / 45);
-      avatar.x += (player.x - avatar.x) * blend;
-      avatar.y += (player.y - avatar.y) * blend;
-    });
-    for (const [id, avatar] of this.avatars) {
-      if (!present.has(id)) { avatar.destroy(); this.avatars.delete(id); }
-    }
-    characterName.textContent = own.nickname;
-    characterStats.textContent = `Lv. ${own.level} · ${own.job} · 경험치 ${own.experience}`;
-    population.textContent = `현재 ${present.size}명 · 전체 ${state.online}/15`;
-    savedAtLabel.textContent = saveError ? "저장 실패 · 재시도 중" :
-      `마지막 저장 ${new Date(own.savedAt).toLocaleTimeString("ko-KR")}`;
-    if (saveError && own.savedAt > savedBeforeError) {
-      saveError = false;
-      gameStatus.textContent = "캐릭터가 다시 정상적으로 저장되고 있어.";
-    }
-    if (time - this.lastSent < 50) return;
-    this.lastSent = time;
-    const right = pressed.has("ArrowRight") || pressed.has("KeyD");
-    const left = pressed.has("ArrowLeft") || pressed.has("KeyA");
-    const down = pressed.has("ArrowDown") || pressed.has("KeyS");
-    const up = pressed.has("ArrowUp") || pressed.has("KeyW");
+    if (connecting)
+        return;
+    connecting = true;
+    el<HTMLButtonElement>('login-button').disabled = true;
+    el('login-status').textContent = '접속 중입니다…';
     try {
-      activeRoom.send("move", loggingOut ? { x: 0, y: 0 } :
-        { x: Number(right) - Number(left), y: Number(down) - Number(up) });
-    } catch {
-      pressed.clear();
-      gameStatus.textContent = "서버 연결을 확인하는 중…";
+        const joined = await client.joinOrCreate('world', { nickname: nickname.value, password: password.value });
+        room = joined;
+        password.value = '';
+        joined.onMessage('snapshot', (p: Snapshot) => {
+            if (room === joined)
+                update(p);
+        });
+        joined.onMessage('ack', (data: {
+            id: number;
+        }) => {
+            if (room === joined && pending === data.id) {
+                pending = null;
+                battleIntent = undefined;
+                window.clearTimeout(commandTimer);
+            }
+        });
+        joined.onMessage('notice', (message: string) => showNotice(message));
+        joined.onMessage('saved', (time: number) => {
+            if (state) {
+                state.savedAt = time;
+                el('save-time').textContent = `저장 ${new Date(time).toLocaleTimeString('ko-KR')}`;
+            }
+        });
+        joined.onMessage('monitor', (m: Monitor) => { observed.set(m.key, m); monitor?.update(m); });
+        joined.onMessage('monitor.remove', (key: string) => { observed.delete(key); monitor?.remove(key); });
+        joined.onMessage('rankings', (rows: Ranking[]) => { rankings = rows; monitor?.rankings(rows); });
+        joined.onMessage('editor', (data: EditorData) => { dialog = 'editor'; el('dialogs').replaceChildren(eventEditor(data, send, closeDialog)); });
+        joined.onMessage('customMap', (data: CustomMap) => {
+            if (room !== joined)
+                return;
+            customData = data;
+            customView?.update(data);
+        });
+        joined.onMessage('reset', () => {
+            if (room !== joined)
+                return;
+            cancelBattlePresentation();
+            promotionNoticeActive = false;
+            deferredNotice = undefined;
+            motion.stop();
+            state = undefined;
+            pending = null;
+            nextSendAt = 0;
+            window.clearTimeout(commandTimer);
+            closeDialog();
+            eventSignature = '';
+            finishShown = null;
+            el('events').replaceChildren();
+            el('finish').replaceChildren();
+        });
+        joined.onMessage('finish', () => { });
+        joined.onError((_code, message) => showNotice(message || '서버 연결에 문제가 발생했습니다.'));
+        joined.onLeave(code => {
+            if (room === joined)
+                clean(code === 4000 ? '저장 후 종료되었습니다.' : '연결이 종료되었습니다. 같은 닉네임으로 다시 접속해 주세요.');
+        });
+        login.hidden = true;
+        game.hidden = false;
+        connecting = false;
+        joined.send('ready');
     }
-  }
+    catch (error) {
+        clean(error instanceof Error ? error.message : '접속하지 못했습니다. 서버 주소와 실행 상태를 확인해 주세요.');
+    }
+});
+el('character').addEventListener('click', () => {
+    if (!state)
+        return;
+    dialog = 'stats';
+    el('dialogs').replaceChildren(characterPanel(state, send, closeDialog));
+});
+el('admin-stats').addEventListener('click', () => {
+    if (!state?.admin)
+        return;
+    dialog = 'adminStats';
+    el('dialogs').replaceChildren(adminStats(state, send, closeDialog));
+});
+el('watch').addEventListener('click', () => {
+    if (!state?.admin)
+        return;
+    if (monitor) {
+        closeMonitor();
+        return;
+    }
+    monitor = monitoringPanel(send, closeMonitor);
+    game.append(monitor.root);
+    game.classList.add('has-monitor');
+    for (const m of observed.values())
+        monitor.update(m);
+    monitor.rankings(rankings);
+    draw();
+});
+function resetMaze() {
+    if (!state?.admin)
+        return;
+    if (window.confirm('저장된 미로 수정안을 모든 계정에 적용하고 레벨·능력치·직업·위치·탐험·문제·전투·순위를 초기화하시겠습니까? 오프라인 계정도 포함되며 닉네임은 유지됩니다.'))
+        send('admin.reset', { confirm: 'RESET_ALL' });
 }
-
-nickname.focus();
+el('reset-maze').addEventListener('click', resetMaze);
+el('custom-mode').addEventListener('click', () => { if (state?.admin)
+    send('admin.custom', { enabled: true }); });
+el('logout').addEventListener('click', () => send('logout'));
+bindControls(world, () => state, () => geometry, () => pending !== null || dialog !== null || motion.running || !!state?.customMode, send);
+const observer = new ResizeObserver(draw);
+observer.observe(world);
+observer.observe(minimap);
+function viewport() { document.documentElement.style.setProperty('--app-height', `${Math.round(window.visualViewport?.height ?? window.innerHeight)}px`); draw(); }
+window.addEventListener('resize', viewport);
+window.visualViewport?.addEventListener('resize', viewport);
+viewport();
