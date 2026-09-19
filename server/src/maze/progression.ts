@@ -16,11 +16,11 @@ export function award(p: Profile, xp: number) {
 }
 export function spend(p: Profile, stat: StatName, random: (min: number, max: number) => number = randomInt) {
     if (p.points < 1) throw new Error('사용할 포인트가 없습니다.');
-    const cap = stat === 'crit' ? 100 : stat === 'critDamage' ? 300 : stat === 'hp' ? 999 : 499;
+    const cap = stat === 'crit' ? 100 : stat === 'critDamage' ? 300 : stat === 'hp' ? 999 : 199;
     if (p.stats[stat] >= cap) throw new Error('이 능력치는 최대치입니다.');
     // Roll at the time of investment. Legacy pre-generated values are never reused.
     const offset = stat === 'hp' || stat === 'attack' || stat === 'defense' ? random(0, 3) - 1 : 0;
-    const increase = stat === 'crit' ? 2 : stat === 'critDamage' ? 10 : (stat === 'hp' ? 20 : stat === 'attack' ? 8 : 5) + offset;
+    const increase = stat === 'crit' ? 2 : stat === 'critDamage' ? 10 : (stat === 'hp' ? 15 : stat === 'attack' ? 5 : 4) + offset;
     p.growthRolls[p.allocations.length] = offset;
     p.stats[stat] = Math.min(cap, p.stats[stat] + increase);
     p.points--;
@@ -68,4 +68,10 @@ export function overrideProfession(p: Profile, value: unknown) {
         p.active.battle.effects = [];
         p.active.battle.cooldowns = { skill1: 0, skill2: 0 };
     }
+}
+
+export function enforceStatCaps(p: Profile) {
+    const caps: Stats = { hp: 999, attack: 199, defense: 199, crit: 100, critDamage: 300 };
+    for (const key of Object.keys(caps) as StatName[]) p.stats[key] = Math.min(p.stats[key], caps[key]);
+    p.hp = Math.min(p.hp, p.stats.hp);
 }

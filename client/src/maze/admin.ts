@@ -15,7 +15,7 @@ function statsInputs(stats: Stats, monster: boolean) {
         input.type = 'number';
         input.step = key === 'crit' ? '0.5' : '1';
         input.min = key === 'critDamage' ? '100' : key === 'hp' || key === 'attack' ? '1' : '0';
-        input.max = key === 'hp' ? '999' : key === 'crit' ? '100' : key === 'critDamage' ? (monster ? '200' : '300') : (monster ? '199' : '499');
+        input.max = key === 'hp' ? '999' : key === 'crit' ? '100' : key === 'critDamage' ? (monster ? '200' : '300') : '199';
         input.value = String(stats[key]);
         input.required = true;
         inputs.set(key, input);
@@ -36,7 +36,7 @@ export function eventEditor(data: EditorData, send: Send, close: () => void) {
         kind.append(option);
     }
     kind.value = data.definition?.kind ?? 'choice';
-    if (data.x === 19 && data.y === 19) {
+    if (data.definition?.boss) {
         kind.value = 'monster';
         kind.disabled = true;
     }

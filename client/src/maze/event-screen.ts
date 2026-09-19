@@ -19,6 +19,7 @@ export function renderEvent(p: Snapshot, send: Send) {
         if (p.admin) header.append(button('운영자 설정', () => document.getElementById('admin-stats')?.click()));
         panel.append(header, monsterBattle(p, send));
     } else {
+        header.append(button('문제 나가기', () => send('quiz.leave')));
         const viewport = node('div', undefined, 'quiz-viewport');
         const content = node('div', undefined, 'quiz-content');
         const form = e.kind === 'choice' ? multipleChoice(e, send) : shortAnswer(send);

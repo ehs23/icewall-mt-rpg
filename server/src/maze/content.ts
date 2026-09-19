@@ -1,5 +1,5 @@
-import type { EventDefinition, Stats } from './types.js';
-import { rebalanceMonsters } from './monster-balance.js';
+import type { EventDefinition } from './types.js';
+import { rebalanceMonsters, mazeDistances } from './monster-balance.js';
 import { tileKey } from './maze.js';
 // Example content only. Operators can replace each prompt and answer in the tile editor.
 const quizBank: [
@@ -22,24 +22,211 @@ const quizBank: [
     ['공개하면 안 되는 정보는 무엇입니까?', ['공식 홈페이지 주소', '일회용 인증번호', '공개 행사 일정'], 1, '이진수 100을 십진수로 바꾼 숫자를 입력해 주세요.', '4'],
     ['프로그램의 오류를 찾아 수정하는 작업은 무엇입니까?', ['디버깅', '압축', '인쇄'], 0, '웹에서 찾을 수 없는 페이지를 나타내는 상태 코드를 숫자로 입력해 주세요.', '404'],
 ];
-const placements: [
-    number,
-    number,
-    'choice' | 'text' | 'monster',
-    boolean
-][] = [
-    [3, 3, 'choice', false], [7, 1, 'text', false], [12, 3, 'choice', false], [15, 6, 'text', false], [9, 7, 'choice', false], [7, 7, 'monster', false],
-    [3, 9, 'choice', false], [6, 11, 'text', false], [1, 12, 'choice', false], [5, 15, 'monster', false],
-    [1, 17, 'text', false], [5, 19, 'choice', false], [7, 14, 'choice', false], [10, 15, 'text', false], [12, 17, 'monster', false],
-    [11, 19, 'choice', false], [15, 17, 'text', false], [18, 13, 'choice', false], [18, 17, 'monster', false],
-    [11, 5, 'choice', true], [5, 5, 'text', true], [17, 5, 'choice', true], [17, 1, 'text', true], [11, 1, 'choice', true], [15, 9, 'monster', true],
-];
-const monsters: Stats[] = [
-    { hp: 26, attack: 6, defense: 3, crit: 0, critDamage: 100 },
-    { hp: 55, attack: 10, defense: 7, crit: 5, critDamage: 125 },
-    { hp: 85, attack: 15, defense: 10, crit: 8, critDamage: 130 },
-    { hp: 115, attack: 18, defense: 14, crit: 10, critDamage: 140 },
-    { hp: 65, attack: 11, defense: 8, crit: 5, critDamage: 120 },
+const placements: [number, number, 'choice' | 'text' | 'monster', boolean][] = [
+  [
+    3,
+    4,
+    "monster",
+    false
+  ],
+  [
+    5,
+    7,
+    "choice",
+    false
+  ],
+  [
+    8,
+    5,
+    "text",
+    false
+  ],
+  [
+    11,
+    7,
+    "monster",
+    false
+  ],
+  [
+    14,
+    5,
+    "choice",
+    false
+  ],
+  [
+    17,
+    7,
+    "text",
+    false
+  ],
+  [
+    13,
+    8,
+    "monster",
+    false
+  ],
+  [
+    16,
+    11,
+    "choice",
+    false
+  ],
+  [
+    19,
+    9,
+    "text",
+    false
+  ],
+  [
+    21,
+    12,
+    "monster",
+    false
+  ],
+  [
+    17,
+    13,
+    "choice",
+    false
+  ],
+  [
+    13,
+    14,
+    "text",
+    false
+  ],
+  [
+    9,
+    15,
+    "monster",
+    false
+  ],
+  [
+    11,
+    11,
+    "choice",
+    false
+  ],
+  [
+    8,
+    9,
+    "text",
+    false
+  ],
+  [
+    5,
+    11,
+    "monster",
+    false
+  ],
+  [
+    6,
+    13,
+    "choice",
+    false
+  ],
+  [
+    5,
+    17,
+    "text",
+    false
+  ],
+  [
+    3,
+    20,
+    "monster",
+    false
+  ],
+  [
+    8,
+    21,
+    "choice",
+    false
+  ],
+  [
+    11,
+    19,
+    "text",
+    false
+  ],
+  [
+    14,
+    21,
+    "monster",
+    false
+  ],
+  [
+    17,
+    19,
+    "choice",
+    false
+  ],
+  [
+    15,
+    16,
+    "monster",
+    false
+  ],
+  [
+    17,
+    17,
+    "text",
+    false
+  ],
+  [
+    21,
+    19,
+    "monster",
+    false
+  ],
+  [
+    3,
+    1,
+    "monster",
+    true
+  ],
+  [
+    6,
+    1,
+    "choice",
+    true
+  ],
+  [
+    1,
+    5,
+    "monster",
+    true
+  ],
+  [
+    1,
+    8,
+    "text",
+    true
+  ],
+  [
+    3,
+    17,
+    "monster",
+    true
+  ],
+  [
+    2,
+    15,
+    "choice",
+    true
+  ],
+  [
+    13,
+    19,
+    "monster",
+    true
+  ],
+  [
+    14,
+    17,
+    "text",
+    true
+  ]
 ];
 export function initialEvents() {
     const result = new Map<string, EventDefinition>();
@@ -48,16 +235,20 @@ export function initialEvents() {
         const id = tileKey(x, y);
         let e: EventDefinition;
         if (kind === 'monster') {
-            e = { id, x, y, kind, prompt: side ? '우회로 파수꾼' : `미로 파수꾼 ${m + 1}`, stats: monsters[m], xp: side ? 250 : [150, 200, 250, 300][m], revision: 1 };
+            e = { id, x, y, kind, prompt: side ? '우회로 파수꾼' : `미로 파수꾼 ${m + 1}`, stats: { hp: 12, attack: 3, defense: 0, crit: 0, critDamage: 100 }, xp: 150, revision: 1 };
             m++;
         }
         else {
             const sample = quizBank[q % quizBank.length];
-            e = { id, x, y, kind, prompt: kind === 'choice' ? sample[0] : sample[3], choices: kind === 'choice' ? sample[1] : undefined, answer: kind === 'choice' ? String(sample[2]) : sample[4], xp: 120, revision: 1 };
+            e = { id, x, y, kind, prompt: kind === 'choice' ? sample[0] : sample[3], choices: kind === 'choice' ? sample[1] : undefined, answer: kind === 'choice' ? String(sample[2]) : sample[4], xp: 100, revision: 1 };
             q++;
         }
         result.set(id, e);
     }
-    result.set('19,19', { id: '19,19', x: 19, y: 19, kind: 'monster', prompt: '출구의 수호자', boss: true, stats: { hp: 160, attack: 18, defense: 12, crit: 10, critDamage: 150 }, xp: 300, revision: 1 });
+    result.set('21,21', { id: '21,21', x: 21, y: 21, kind: 'monster', prompt: '출구의 수호자', boss: true, stats: { hp: 160, attack: 18, defense: 12, crit: 10, critDamage: 150 }, xp: 300, revision: 1 });
+    // Earlier encounters award one level; later ones award up to two levels.
+    const distances = mazeDistances();
+    for (const e of result.values()) if (e.kind === 'monster' && !e.boss)
+        e.xp = Math.min(200, 100 + Math.floor((distances.get(e.id) ?? 0) / 40) * 25);
     return rebalanceMonsters(result);
 }

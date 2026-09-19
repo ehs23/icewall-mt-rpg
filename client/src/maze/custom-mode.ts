@@ -4,7 +4,7 @@ export function customModeView(data: CustomMap, send: Send, reset: () => void) {
     const root = node('section', undefined, 'custom-mode');
     const header = node('header');
     header.append(node('h2', '미로 커스텀 모드'), button('게임으로 돌아가기', () => send('admin.custom', { enabled: false })));
-    const description = node('p', '저장된 수정안입니다. 전체 초기화 시 운영자와 모든 사용자에게 함께 적용됩니다.');
+    const description = node('p', '도구를 고른 뒤 칸을 눌러 편집해 주세요. 수정안은 자동 저장되며 전체 초기화 시 모두에게 적용됩니다. 새 미로는 출구 보스를 지정해 주세요.');
     const space = node('div', undefined, 'custom-map-space'), canvas = node('canvas');
     canvas.setAttribute('aria-label', '전체 미로 편집 지도. 아래 열·행 입력으로도 칸을 선택하실 수 있습니다.');
     space.append(canvas);
@@ -18,12 +18,39 @@ export function customModeView(data: CustomMap, send: Send, reset: () => void) {
         input.value = '2';
         input.required = true;
     }
+    const tools = node('div', undefined, 'custom-tools');
+    const tool = node('select');
+    for (const [value, label] of [['select', '칸 선택'], ['wall', '벽 세우기'], ['passage', '벽 지우기'], ['boss', '출구 보스 지정']]) {
+        const option = node('option', label); option.value = value; tool.append(option);
+    }
+    const sizeInput = node('input'); sizeInput.type = 'number'; sizeInput.min = '7'; sizeInput.max = '51'; sizeInput.step = '1'; sizeInput.value = String(data.grid.length);
+    function replaceDraft(operation: string) {
+        if (operation !== 'default' && !sizeInput.checkValidity()) { sizeInput.reportValidity(); return; }
+        const message = operation === 'default' ? '수정안의 크기·벽·문제를 저장한 기본 미로로 되돌리시겠습니까?' : operation === 'blank' ? '입력한 크기로 바깥 테두리만 남기고 내부 벽과 모든 문제·몬스터를 지우시겠습니까?' : '미로 크기를 변경하시겠습니까? 범위 밖의 문제는 삭제되며 새 공간은 통로가 됩니다.';
+        if (window.confirm(message + '\n진행 중인 게임에는 전체 초기화 시 적용됩니다.')) send('admin.layout', { operation, size: Number(sizeInput.value), confirm: 'REPLACE_DRAFT' });
+    }
+    tools.append(field('편집 도구', tool), field('가로·세로 크기', sizeInput),
+        button('크기 변경', () => replaceDraft('resize')),
+        button('기본값으로 적용', () => {
+            if (window.confirm('현재 수정안의 크기·벽·문제·몬스터를 새 기본값으로 저장하시겠습니까? 기존 복원용 기본값은 교체되며 진행 중인 게임은 유지됩니다.'))
+                send('admin.setDefault', { confirm: 'SET_DEFAULT' });
+        }),
+        button('기본 미로·내용 복원', () => replaceDraft('default')),
+        button('미로 새로 재설계', () => replaceDraft('blank'), 'danger'));
     let selected = { x: 1, y: 1 }, geometry = { left: 0, top: 0, cell: 1 };
     const detail = node('p', undefined, 'custom-selection');
     const edit = button('선택 칸 편집', () => send('admin.edit', selected));
     const warp = button('선택 칸으로 워프', () => send('admin.warp', selected));
-    toolbar.append(field('열', column), field('행', row), edit, warp, button('전체 진행 초기화', reset, 'danger'));
-    root.append(header, description, node('small', '객: 객관식 · 주: 주관식 · 몬: 몬스터 · 왕: 보스 · 시: 시작'), space, detail, toolbar);
+    const applyTool = button('선택 칸에 도구 적용', useTool);
+    function useTool() {
+        if (tool.value === 'select') return;
+        const event = data.events.find(e => e.x === selected.x && e.y === selected.y);
+        if (tool.value === 'wall' && event && !window.confirm('벽을 세우면 이 칸의 문제 또는 몬스터가 삭제됩니다. 계속하시겠습니까?')) return;
+        if (tool.value === 'boss' && event && event.kind !== 'monster' && !window.confirm('이 칸의 문제를 출구 보스로 교체하시겠습니까?')) return;
+        send('admin.layout', { operation: tool.value, ...selected });
+    }
+    toolbar.append(field('열', column), field('행', row), edit, applyTool, warp, button('전체 진행 초기화', reset, 'danger'));
+    root.append(header, description, node('small', '객: 객관식 · 주: 주관식 · 몬: 몬스터 · 왕: 보스 · 시: 시작'), space, detail, tools, toolbar);
     function draw() {
         const rect = space.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0)
@@ -65,6 +92,7 @@ export function customModeView(data: CustomMap, send: Send, reset: () => void) {
         const event = events.get(`${selected.x},${selected.y}`), isWall = data.grid[selected.y]?.[selected.x] !== '1';
         detail.textContent = `${selected.x + 1}열 ${selected.y + 1}행 · ${isWall ? '벽' : event?.prompt ?? '이벤트 없음'}`;
         warp.disabled = isWall;
+        applyTool.disabled = tool.value === 'select';
         edit.disabled = isWall || (selected.x === 1 && selected.y === 1);
     }
     canvas.addEventListener('click', event => {
@@ -76,6 +104,7 @@ export function customModeView(data: CustomMap, send: Send, reset: () => void) {
         column.value = String(x + 1);
         row.value = String(y + 1);
         draw();
+        useTool();
     });
     for (const input of [column, row])
         input.addEventListener('change', () => {
@@ -84,7 +113,8 @@ export function customModeView(data: CustomMap, send: Send, reset: () => void) {
             selected = { x: Number(column.value) - 1, y: Number(row.value) - 1 };
             draw();
         });
+    tool.addEventListener('change', draw);
     const observer = new ResizeObserver(draw);
     observer.observe(space);
-    return { root, update: (next: CustomMap) => { data = next; draw(); }, destroy: () => { observer.disconnect(); root.remove(); } };
+    return { root, update: (next: CustomMap) => { data = next; sizeInput.value = String(data.grid.length); for (const input of [column, row]) input.max = String(data.grid.length); selected.x = Math.min(selected.x, data.grid.length - 1); selected.y = Math.min(selected.y, data.grid.length - 1); column.value = String(selected.x + 1); row.value = String(selected.y + 1); draw(); }, destroy: () => { observer.disconnect(); root.remove(); } };
 }

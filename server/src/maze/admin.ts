@@ -35,7 +35,7 @@ export function parseStats(data: unknown, monster: boolean): Stats {
         throw new Error('능력치를 입력해 주세요.');
     const s = data as Record<string, unknown>;
     const result = {} as Stats;
-    for (const [key, min, max] of [['hp', 1, 999], ['attack', 1, monster ? 199 : 499], ['defense', 0, monster ? 199 : 499], ['crit', 0, 100], ['critDamage', 100, monster ? 200 : 300]] as const) {
+    for (const [key, min, max] of [['hp', 1, 999], ['attack', 1, 199], ['defense', 0, 199], ['crit', 0, 100], ['critDamage', 100, monster ? 200 : 300]] as const) {
         const value = s[key];
         if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max || (key === 'crit' ? !Number.isInteger(value * 2) : !Number.isInteger(value)))
             throw new Error(`${key}의 입력 범위를 확인해 주세요.`);
@@ -43,13 +43,13 @@ export function parseStats(data: unknown, monster: boolean): Stats {
     }
     return result;
 }
-export function parseDefinition(data: Record<string, unknown>, previous?: EventDefinition): EventDefinition {
+export function parseDefinition(data: Record<string, unknown>, previous?: EventDefinition, grid?: string[]): EventDefinition {
     const { x, y, kind, prompt } = data;
-    if (typeof x !== 'number' || typeof y !== 'number' || !walkable(x, y) || (x === 1 && y === 1))
+    if (typeof x !== 'number' || typeof y !== 'number' || !walkable(x, y, grid) || (x === 1 && y === 1))
         throw new Error('시작 지점을 제외한 통로를 선택해 주세요.');
     if (!['choice', 'text', 'monster'].includes(String(kind)) || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000)
         throw new Error('문제 유형과 내용을 확인해 주세요.');
-    const boss = x === 19 && y === 19;
+    const boss = previous?.boss === true;
     if (boss && kind !== 'monster')
         throw new Error('탈출구에는 보스 전투만 배치하실 수 있습니다.');
     const e: EventDefinition = { id: tileKey(x, y), x, y, kind: kind as EventDefinition['kind'], prompt: prompt.trim(), boss, xp: kind === 'monster' ? (previous?.kind === 'monster' ? previous.xp : 200) : 120, revision: (previous?.revision ?? 0) + 1 };

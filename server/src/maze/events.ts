@@ -7,7 +7,7 @@ export function enterEvent(p: Profile, definition: EventDefinition | undefined, 
 ]) {
     if (!definition || p.cleared.includes(definition.id))
         return;
-    p.active = { definition: structuredClone(definition), from };
+    p.active = { definition: structuredClone(definition), from, retryAt: p.quizRetries?.[definition.id] };
     if (definition.kind === 'monster')
         p.active.battle = { monsterHp: definition.stats!.hp, turn: 1, effects: [], cooldowns: { skill1: 0, skill2: 0 }, log: ['전투가 시작되었습니다.'] };
 }
@@ -31,6 +31,7 @@ export function answerQuiz(p: Profile, answer: unknown, now = Date.now()) {
     const normalize = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
     if (normalize(answer) !== normalize(e.answer!)) {
         p.active!.retryAt = now + 30_000;
+        (p.quizRetries ??= {})[e.id] = p.active!.retryAt;
         return false;
     }
     completeEvent(p);
@@ -52,4 +53,12 @@ export function publicEvent(p: Profile): PublicEvent | null {
         output.playerStats = effectiveBattleStats(p);
     }
     return output;
+}
+
+export function leaveQuiz(p: Profile) {
+    const active = p.active;
+    if (!active || active.definition.kind === 'monster') throw new Error('퀴즈 화면에서 사용해 주세요.');
+    if (active.retryAt) (p.quizRetries ??= {})[active.definition.id] = active.retryAt;
+    [p.x, p.y] = active.from;
+    p.active = null;
 }

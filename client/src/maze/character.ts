@@ -12,7 +12,7 @@ export function characterPanel(p: Snapshot, send: Send, close: () => void) {
         row.append(node('span', `${statNames[stat]} ${p.stats[stat]}${stat === 'crit' || stat === 'critDamage' ? '%' : ''}`), add);
         panel.append(row);
     }
-    panel.append(node('small', '레벨업마다 2포인트를 받습니다. 포인트당 체력 +19~21, 공격 +7~9, 방어 +4~6, 치명타율 +2%, 치명타 피해 +10%입니다.'));
+    panel.append(node('small', '레벨업마다 2포인트를 받습니다. 포인트당 체력 +14~16, 공격 +4~6, 방어 +3~5, 치명타율 +2%, 치명타 피해 +10%입니다.'));
     const reset = button('포인트 재분배', () => send('respec'), 'secondary');
     reset.disabled = !!p.active?.battle;
     panel.append(reset);
@@ -41,6 +41,14 @@ export function characterPanel(p: Snapshot, send: Send, close: () => void) {
     };
     if (p.profession) panel.append(node('small', descriptions[p.profession]));
     panel.append(node('p', p.profession ? `첫 번째 슬롯 · 스킬 Lv.${p.skillLevel} · 재사용 대기 1턴` : '🔒 첫 번째 슬롯 · 1차 전직 시 해제'));
+    const advancedDescriptions = {
+        Searcher: '나는 회장의 자질을 가지고 있어: 적의 남은 체력 절반을 기준으로 피해를 줍니다. 적의 방어력이 적용됩니다.',
+        Translater: '찾았다 너의 핵심: 적의 공격력·방어력·치명타율·치명타 피해 중 하나를 선택하여 100 낮춥니다(최소 0). 시전 턴과 다음 행동까지 유지됩니다.',
+        Buffer: '적의 기능은 이제 당신 것입니다: 이번 반격에서 적이 플레이어 대신 자신을 공격하게 합니다.',
+        Tracker: '너는 무엇으로 이루어져 있니: 적의 공격력·방어력·치명타율·치명타 피해 중 하나의 30%를 반올림하여 빼앗습니다. 시전 턴과 다음 행동까지 유지됩니다.',
+    };
+    if (p.level >= 25 && p.profession && p.advanced)
+        panel.append(node('small', advancedDescriptions[p.profession]));
     if (p.level >= 25 && p.profession)
         panel.append(node('p', p.advanced ? '두 번째 슬롯 · Non3 · 재사용 대기 2턴' : '🔒 두 번째 슬롯 · 2차 전직 시 해제'));
     return overlay;

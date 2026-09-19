@@ -61,7 +61,7 @@ export function drawMinimap(canvas: HTMLCanvasElement, p: Snapshot) {
     ctx.scale(ratio, ratio);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, width);
-    const cell = width / 21;
+    const cell = width / (p.mazeSize ?? 21);
     ctx.fillStyle = '#fff';
     for (const key of p.visited) {
         const [x, y] = key.split(',').map(Number);

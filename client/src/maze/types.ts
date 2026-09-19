@@ -55,6 +55,7 @@ export type Profile = {
     advanced: boolean;
     visited: string[];
     cleared: string[];
+    quizRetries?: Record<string, number>;
     active: ActiveEvent | null;
     startedAt: number;
     finishedAt: number | null;
@@ -88,6 +89,7 @@ export type PublicEvent = {
     battle?: Omit<Battle, 'monsterHp'>;
 };
 export type Snapshot = {
+    mazeSize?: number;
     revision: number;
     admin: boolean;
     customMode: boolean;

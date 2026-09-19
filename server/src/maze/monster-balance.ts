@@ -10,13 +10,22 @@ const TIERS: [number, Stats][] = [
     [28, { hp: 540, attack: 110, defense: 26, crit: 10, critDamage: 130 }],
     [50, { hp: 850, attack: 175, defense: 55, crit: 15, critDamage: 150 }],
 ];
-export function rebalanceMonsters(events: Map<string, EventDefinition>) {
+export function mazeParents() {
     const parents = new Map<string, string>([['1,1', '']]);
     const queue: [number, number][] = [[1, 1]];
     for (const [x, y] of queue) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = x + dx, ny = y + dy, key = `${nx},${ny}`;
         if (GRID[ny]?.[nx] === '1' && !parents.has(key)) { parents.set(key, `${x},${y}`); queue.push([nx, ny]); }
     }
+    return parents;
+}
+export function mazeDistances() {
+    const result = new Map<string, number>();
+    for (const [key, parent] of mazeParents()) result.set(key, parent ? (result.get(parent) ?? 0) + 1 : 0);
+    return result;
+}
+export function rebalanceMonsters(events: Map<string, EventDefinition>) {
+    const parents = mazeParents();
     for (const e of events.values()) {
         if (e.kind !== 'monster') continue;
         let xp = 0, at = parents.get(`${e.x},${e.y}`);

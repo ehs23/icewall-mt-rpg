@@ -1,10 +1,12 @@
+import { saveDefaultPreset } from '../maze/default-preset.js';
 import { Room, type Client } from 'colyseus';
 import { fileURLToPath } from 'node:url';
+import { editLayout } from '../maze/layout.js';
 import { MazeStore } from '../maze/store.js';
-import { MAX_PLAYERS, GRID, tileKey, walkable, visibleTiles } from '../maze/maze.js';
+import { MAX_PLAYERS, tileKey, walkable, visibleTiles } from '../maze/maze.js';
 import { authenticate, parseDefinition, parseStats } from '../maze/admin.js';
-import { overrideProfession, chooseProfession, isStat, respec, skillLevel, spend } from '../maze/progression.js';
-import { answerQuiz, completeEvent, enterEvent, publicEvent } from '../maze/events.js';
+import { enforceStatCaps, overrideProfession, chooseProfession, isStat, respec, skillLevel, spend } from '../maze/progression.js';
+import { leaveQuiz, answerQuiz, completeEvent, enterEvent, publicEvent } from '../maze/events.js';
 import { battleTurn } from '../maze/battle.js';
 import type { Command, Profile, Snapshot } from '../maze/types.js';
 const store = new MazeStore(process.env.CHARACTER_DB_PATH || fileURLToPath(new URL('../../data/characters.sqlite', import.meta.url)));
@@ -25,6 +27,8 @@ export class MyRoom extends Room {
     private definitions = store.events();
     private draftDefinitions = store.drafts();
     private ranks = store.rankings();
+    private grid = store.grid();
+    private draftGrid = store.grid(true);
     onCreate() {
         if (activeWorld)
             throw new Error('서버 정원이 가득 찼습니다. 잠시 후 다시 접속해 주세요.');
@@ -84,12 +88,14 @@ export class MyRoom extends Room {
         if (!auth.admin && [...this.sessions.values()].filter(s => !s.admin).length >= 19)
             throw new Error('플레이어 정원이 가득 찼습니다.');
         const s: Session = { profile: store.load(auth.key, auth.nickname), admin: auth.admin, revision: 0, lastId: 0, nextActionAt: 0, ready: false, customMode: false };
+        enforceStatCaps(s.profile);
+        store.save([s.profile]);
         this.sessions.set(client.sessionId, s);
         this.monitor(s);
     }
     private snapshot(s: Session): Snapshot {
         const p = s.profile;
-        return { revision: s.revision, admin: s.admin, customMode: s.admin && s.customMode, nickname: p.nickname, x: p.x, y: p.y, level: p.level, xp: p.xp, stats: { ...p.stats }, hp: p.hp, points: p.points, profession: p.profession, advanced: p.advanced, skillLevel: skillLevel(p), tiles: visibleTiles(p, this.definitions, s.admin), visited: [...p.visited], active: publicEvent(p), savedAt: p.savedAt, finishedAt: p.finishedAt, rank: this.ranks.find(r => r.key === p.key)?.rank ?? null };
+        return { mazeSize: this.grid.length, revision: s.revision, admin: s.admin, customMode: s.admin && s.customMode, nickname: p.nickname, x: p.x, y: p.y, level: p.level, xp: p.xp, stats: { ...p.stats }, hp: p.hp, points: p.points, profession: p.profession, advanced: p.advanced, skillLevel: skillLevel(p), tiles: visibleTiles(p, this.definitions, s.admin, this.grid), visited: [...p.visited], active: publicEvent(p), savedAt: p.savedAt, finishedAt: p.finishedAt, rank: this.ranks.find(r => r.key === p.key)?.rank ?? null };
     }
     private sendOwn(client: Client, s: Session) { client.send('snapshot', this.snapshot(s)); }
     private forAdmin(type: string, data: unknown) {
@@ -145,7 +151,7 @@ export class MyRoom extends Room {
                     if (p.active)
                         throw new Error('진행 중인 문제나 전투를 먼저 완료해 주세요.');
                     const { x, y } = data;
-                    if (typeof x !== 'number' || typeof y !== 'number' || Math.abs(x - p.x) + Math.abs(y - p.y) !== 1 || !walkable(x, y))
+                    if (typeof x !== 'number' || typeof y !== 'number' || Math.abs(x - p.x) + Math.abs(y - p.y) !== 1 || !walkable(x, y, this.grid))
                         throw new Error('상하좌우의 인접한 통로를 선택해 주세요.');
                     const from: [
                         number,
@@ -160,6 +166,10 @@ export class MyRoom extends Room {
                     changed = true;
                     break;
                 }
+                case 'quiz.leave':
+                    leaveQuiz(p);
+                    changed = true;
+                    break;
                 case 'answer':
                     if (!answerQuiz(p, data.answer)) client.send('notice', '정답이 아닙니다. 30초 후 다시 도전해 주세요.');
                     changed = true;
@@ -220,7 +230,7 @@ export class MyRoom extends Room {
                 case 'admin.warp': {
                     this.requireAdmin(s);
                     const { x, y } = data;
-                    if (typeof x !== 'number' || typeof y !== 'number' || !walkable(x, y)) throw new Error('이동할 통로 칸을 선택해 주세요.');
+                    if (typeof x !== 'number' || typeof y !== 'number' || !walkable(x, y, this.grid)) throw new Error('이동할 통로 칸을 선택해 주세요.');
                     if (p.active) throw new Error('진행 중인 이벤트를 완료하거나 건너뛴 뒤 워프해 주세요.');
                     const from: [number, number] = [p.x, p.y];
                     p.x = x; p.y = y;
@@ -246,6 +256,8 @@ export class MyRoom extends Room {
                         throw new Error('전체 초기화를 확인해 주세요.');
                     const reset = store.resetAll();
                     this.definitions = reset.events;
+                    this.grid = store.grid();
+                    this.draftGrid = store.grid(true);
                     this.draftDefinitions = new Map([...reset.events].map(([id, event]) => [id, structuredClone(event)]));
                     for (const other of this.sessions.values()) {
                         other.profile = reset.profiles.get(other.profile.key)!;
@@ -293,10 +305,28 @@ export class MyRoom extends Room {
                     client.send('notice', '직업을 변경했습니다. 필요한 전직 레벨보다 낮으면 레벨도 함께 올렸습니다.');
                     break;
                 }
+                case 'admin.setDefault': {
+                    this.requireAdmin(s);
+                    if (!s.customMode || data.confirm !== 'SET_DEFAULT') throw new Error('커스텀 모드에서 기본값 저장을 확인해 주세요.');
+                    saveDefaultPreset(process.env.CHARACTER_DB_PATH || fileURLToPath(new URL('../../data/characters.sqlite', import.meta.url)), { grid: this.draftGrid, events: this.draftDefinitions });
+                    client.send('notice', '현재 제작한 미로와 문제 내용을 기본값으로 저장했습니다.');
+                    break;
+                }
+                case 'admin.layout': {
+                    this.requireAdmin(s);
+                    if (!s.customMode) throw new Error('미로 커스텀 모드에서 사용해 주세요.');
+                    const layout = editLayout({ grid: this.draftGrid, events: this.draftDefinitions }, data, store.defaultLayout());
+                    store.saveLayout(layout);
+                    this.draftGrid = layout.grid;
+                    this.draftDefinitions = layout.events;
+                    this.sendCustomMap(client, s);
+                    client.send('notice', '미로 수정안을 저장했습니다. 전체 초기화 시 적용됩니다.');
+                    break;
+                }
                 case 'admin.edit': {
                     this.requireAdmin(s);
                     const { x, y } = data;
-                    if (typeof x !== 'number' || typeof y !== 'number' || (!s.customMode && Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) > 1) || !walkable(x, y))
+                    if (typeof x !== 'number' || typeof y !== 'number' || (!s.customMode && Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) > 1) || !walkable(x, y, this.draftGrid))
                         throw new Error('현재 시야 안의 통로를 길게 눌러 주세요.');
                     client.send('editor', { x, y, definition: this.draftDefinitions.get(tileKey(x, y)) ?? null });
                     break;
@@ -308,13 +338,13 @@ export class MyRoom extends Room {
                         throw new Error('현재 시야 안의 칸만 편집하실 수 있습니다.');
                     const key = tileKey(x, y);
                     if (data.kind === 'empty') {
-                        if (!walkable(x, y) || key === '1,1' || key === '19,19')
+                        if (!walkable(x, y, this.draftGrid) || key === '1,1' || this.draftDefinitions.get(key)?.boss)
                             throw new Error('시작 칸과 출구 보스는 삭제하실 수 없습니다.');
                         store.deleteDraft(key);
                         this.draftDefinitions.delete(key);
                     }
                     else {
-                        const e = parseDefinition(data, this.draftDefinitions.get(key));
+                        const e = parseDefinition(data, this.draftDefinitions.get(key), this.draftGrid);
                         store.putDraft(e);
                         this.draftDefinitions.set(e.id, e);
                     }
@@ -370,7 +400,7 @@ export class MyRoom extends Room {
     }
     private sendCustomMap(client: Client, s: Session) {
         if (s.admin && s.customMode)
-            client.send('customMap', { grid: GRID, events: [...this.draftDefinitions.values()] });
+            client.send('customMap', { grid: this.draftGrid, events: [...this.draftDefinitions.values()] });
     }
     private requireAdmin(s: Session) {
         if (!s.admin)

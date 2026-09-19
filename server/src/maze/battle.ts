@@ -15,17 +15,18 @@ export function normalizeBattle(b: Battle) {
     // Legacy buffs are safely expired when loading an older saved battle.
     return b;
 }
-export function defend(raw: number, defense: number) {
+export function defend(raw: number, defense: number, defenseWeight = 1) {
     raw = Math.max(0, Math.round(raw));
     if (!raw) return 0;
+    defense = Math.max(0, defense * defenseWeight);
     return Math.max(1, raw - (defense > 0 ? Math.max(1, Math.round(raw * defense / (30 + defense))) : 0));
 }
-export function calculateHit(attacker: Stats, defender: Stats, random: Random = randomInt): HitResult {
+export function calculateHit(attacker: Stats, defender: Stats, random: Random = randomInt, defenseWeight = 1): HitResult {
     const spread = Math.round(attacker.attack * 0.1);
     const base = attacker.attack + random(-spread, spread + 1);
     const critical = random(0, 10000) < Math.round(Math.min(100, attacker.crit) * 100);
     const raw = Math.max(0, Math.round(base * (critical ? attacker.critDamage / 100 : 1)));
-    const damage = defend(raw, defender.defense);
+    const damage = defend(raw, defender.defense, defenseWeight);
     return { raw, damage, blocked: raw - damage, critical };
 }
 export function effectiveBattleStats(p: Profile): Stats {
@@ -109,7 +110,7 @@ export function battleTurn(p: Profile, action: unknown, target?: unknown, random
             damageEnemy(hit.damage, '몬스터 자신 공격');
         } else if (evade) battle.log.push('상대 공격을 회피했습니다.');
         else {
-            const hit = calculateHit(enemy, effectiveBattleStats(p), random);
+            const hit = calculateHit(enemy, effectiveBattleStats(p), random, 1.5);
             if (battle.effects.some(e => e.kind === 'guard')) {
                 const received = Math.round(hit.damage * 0.3);
                 p.hp = Math.max(0, p.hp - received);
